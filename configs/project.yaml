@@ -1,0 +1,27 @@
+# Fill this in before running against a real project.
+# Everything the CEO Agent needs to write the initial charter comes from here.
+
+project_name: "{{PROJECT_NAME}}"
+domain: "{{DOMAIN}}"
+one_line_goal: "{{ONE_LINE_GOAL}}"
+tech_stack: "{{TECH_STACK}}"
+deadline: "{{DEADLINE}}"
+constraints:
+  - "{{CONSTRAINT_1}}"
+  - "{{CONSTRAINT_2}}"
+standards:
+  coding_style: "{{CODING_STYLE}}"
+  security_baseline: "{{SECURITY_BASELINE}}"
+
+# Example (uncomment / replace above to try the scaffold end-to-end):
+# project_name: "Recipe Sharing API"
+# domain: "consumer web app"
+# one_line_goal: "Let home cooks publish and search recipes with a REST API and a simple web UI."
+# tech_stack: "Python/FastAPI backend, React frontend, PostgreSQL"
+# deadline: "2026-09-01"
+# constraints:
+#   - "Must run on a single small VM (no k8s)"
+#   - "No third-party auth provider — email/password only"
+# standards:
+#   coding_style: "PEP8 / Prettier defaults"
+#   security_baseline: "OWASP ASVS Level 1"

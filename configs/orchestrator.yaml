@@ -1,0 +1,11 @@
+orchestrator:
+  scheduling_policy: dependency_first
+  max_parallel_branches: 4
+  retry_defaults:
+    backoff: exponential
+    base_delay_seconds: 5
+  default_provider: "anthropic"   # or "openai" — override with `python run.py --provider openai`
+  default_models:
+    anthropic: "claude-sonnet-5"
+    openai: "gpt-5.6"
+  escalation_default_target: project_manager_agent

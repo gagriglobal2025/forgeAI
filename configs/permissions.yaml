@@ -1,0 +1,12 @@
+permissions:
+  default: deny
+  rules:
+    - agent: orchestrator
+      allow: ["task.*", "message.*", "memory.global.read"]
+      deny: ["code.write", "doc.write", "test.run", "deploy.execute"]
+    - agent: devops_lead
+      allow: ["ci.run", "infra.provision", "deploy.execute", "deploy.rollback"]
+      requires_approval_from: [qa_lead, security_lead]
+    - agent: database_agent
+      allow: ["db.schema.write", "db.migration.generate"]
+      destructive_change_requires_approval: true

@@ -1,0 +1,14 @@
+memory:
+  global:
+    backend: json_file
+    path: "memory_store/global.json"
+    write_roles: [ceo_agent, architect_agent, project_manager_agent]
+  agent_local:
+    backend: ephemeral
+    persist_debug_copy: true
+    path: "memory_store/agent_local"
+  artifact:
+    backend: filesystem
+    path: "artifacts"
+    immutable: true
+    versioning: append-only

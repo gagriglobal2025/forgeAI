@@ -1,0 +1,380 @@
+# Full agent roster. Each entry drives agents/base_agent.py:
+#   - inputs: artifact keys fetched (latest validated version) before prompting
+#   - output_key: artifact key this agent writes on success
+#   - verdict_required: true => the agent must end its response with "VERDICT: PASS" or "VERDICT: FAIL";
+#                        a FAIL is treated as a task failure and consumes a retry.
+#   - requires_human_approval: true => scheduler pauses for a CLI y/n before marking the artifact VALIDATED
+#
+# This is the machine-readable form of Section 3 of the Forge AI spec. Field names map directly
+# onto the master prompt template (prompts/template.md).
+
+agents:
+  - name: ceo_agent
+    display_name: "CEO Agent"
+    purpose: >
+      Final authority on scope, priority, and trade-offs; the human's single point of contact.
+    responsibilities:
+      - "Turn the raw project brief into an approved project charter."
+      - "Resolve escalations that reach exec severity."
+    inputs: []
+    output_key: charter
+    tools: ["memory.global.rw", "message.broadcast", "human.request_approval"]
+    constraints: "May not write code or technical artifacts. Every decision must be traceable to the project brief."
+    trigger: "New project kickoff."
+    completion_criteria: "Charter approved by the human reviewer."
+    failure_conditions: "No decision within SLA; decision contradicts prior global memory constraints."
+    max_attempts: 1
+    escalation_target: human
+    verdict_required: false
+    requires_human_approval: true
+
+  - name: product_agent
+    display_name: "Product Agent"
+    purpose: >
+      Owns the "what" — user stories, acceptance criteria, prioritization rationale.
+    responsibilities:
+      - "Write user stories covering every goal in the charter."
+      - "Attach testable acceptance criteria to every story."
+    inputs: ["charter"]
+    output_key: user_stories
+    tools: ["memory.global.read", "doc.write"]
+    constraints: "No technical design decisions — those belong to the Architect Agent."
+    trigger: "Charter approved."
+    completion_criteria: "Every charter goal has at least one story with testable acceptance criteria."
+    failure_conditions: "Acceptance criteria are not testable; stories contradict each other."
+    max_attempts: 2
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: architect_agent
+    display_name: "Architect Agent"
+    purpose: >
+      Owns the "how" at system level — stack choice, module boundaries, data flow, interface contracts.
+    responsibilities:
+      - "Produce a system design covering frontend, backend, and data layers."
+      - "Define interface contracts between Frontend, Backend, and Database work."
+    inputs: ["user_stories"]
+    output_key: architecture
+    tools: ["memory.global.write", "diagram.generate", "doc.write"]
+    constraints: "Must not write implementation code. Must justify the stack choice against stated constraints."
+    trigger: "User stories validated."
+    completion_criteria: "Design covers every story and defines concrete interface contracts."
+    failure_conditions: "A downstream Lead would find the contract infeasible; contracts are circular."
+    max_attempts: 2
+    escalation_target: ceo_agent
+    verdict_required: false
+    requires_human_approval: false
+    skill_references: [".agents/skills/improve-codebase-architecture/GUIDANCE.md"]
+
+  - name: ui_agent
+    display_name: "UI Agent"
+    purpose: "Implements visual components per the architecture and interface contracts."
+    responsibilities:
+      - "Design the component/screen inventory implied by the architecture."
+      - "Specify how each component wires to the API contracts."
+    inputs: ["architecture"]
+    output_key: ui_components
+    tools: ["code.write", "code.read", "test.run"]
+    constraints: "May not redefine API contracts. Consumes, does not invent, UX flows."
+    trigger: "Architecture published."
+    completion_criteria: "Every user-facing story in user_stories has a corresponding component."
+    failure_conditions: "Component references an endpoint not in the architecture's contracts."
+    max_attempts: 2
+    escalation_target: frontend_lead
+    verdict_required: false
+    requires_human_approval: false
+    skill_references: [".agents/skills/frontend-design/SKILL.md"]
+
+  - name: ux_agent
+    display_name: "UX Agent"
+    purpose: "Defines interaction flows and wireframes."
+    responsibilities:
+      - "Map every user story to a concrete user journey."
+      - "Describe wireframe-level layout for each screen in the journey."
+    inputs: ["architecture"]
+    output_key: ux_flows
+    tools: ["diagram.generate", "doc.write"]
+    constraints: "No visual styling decisions (UI Agent-owned). No code."
+    trigger: "Architecture published."
+    completion_criteria: "Every story has a corresponding flow."
+    failure_conditions: "A flow does not satisfy its acceptance criteria."
+    max_attempts: 2
+    escalation_target: frontend_lead
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: accessibility_agent
+    display_name: "Accessibility Agent"
+    purpose: "Guarantees WCAG-level compliance across frontend artifacts."
+    responsibilities:
+      - "Audit the UI components and UX flows for accessibility violations."
+      - "Specify concrete remediation for every violation found."
+    inputs: ["ui_components", "ux_flows"]
+    output_key: a11y_audit
+    tools: ["a11y.scan", "doc.write", "task.create"]
+    constraints: "Cannot alter component specs directly — issues remediation notes back to the UI Agent."
+    trigger: "UI and UX artifacts submitted for merge."
+    completion_criteria: "Zero blocking-severity violations remain."
+    failure_conditions: "A blocking violation is unresolved after two remediation cycles."
+    max_attempts: 2
+    escalation_target: frontend_lead
+    verdict_required: true
+    requires_human_approval: false
+    skill_references: [".agents/skills/web-design-guidelines/GUIDELINES.md"]
+    rework_agents: [ui_agent, ux_agent]
+    max_rework_cycles: 2
+
+  - name: frontend_lead
+    display_name: "Frontend Lead"
+    purpose: "Owns delivery and quality of all client-facing artifacts."
+    responsibilities:
+      - "Merge UI, UX, and Accessibility outputs into one coherent frontend module."
+      - "Confirm the merged module is contract-compliant end to end."
+    inputs: ["ui_components", "ux_flows", "a11y_audit"]
+    output_key: frontend_module
+    tools: ["task.assign", "code.review", "message.send"]
+    constraints: "Does not write UI/UX code directly — merges and reviews sub-agent output only."
+    trigger: "UI, UX, and Accessibility agents have all produced artifacts."
+    completion_criteria: "Merged module is internally consistent and contract-compliant."
+    failure_conditions: "Sub-agent artifacts conflict with each other or with the architecture's contracts."
+    max_attempts: 1
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: database_agent
+    display_name: "Database Agent"
+    purpose: "Owns schema design, migrations, and data-integrity rules."
+    responsibilities:
+      - "Design a schema that covers every entity implied by the architecture."
+      - "Specify migrations and constraints/indices."
+    inputs: ["architecture"]
+    output_key: db_schema
+    tools: ["db.schema.write", "db.migration.generate"]
+    constraints: "Schema changes must be additive/versioned. Destructive changes require explicit approval (out of scope for a first version)."
+    trigger: "Architecture published."
+    completion_criteria: "Schema covers every entity needed by the domain logic."
+    failure_conditions: "A destructive change is proposed without an approval path."
+    max_attempts: 2
+    escalation_target: backend_lead
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: business_logic_agent
+    display_name: "Business Logic Agent"
+    purpose: "Implements domain rules and workflows independent of transport/storage."
+    responsibilities:
+      - "Encode every acceptance criterion as a traceable domain rule or function."
+      - "Expose a clean function/service inventory for the API Agent to call."
+    inputs: ["architecture", "user_stories"]
+    output_key: domain_logic
+    tools: ["code.write", "code.read"]
+    constraints: "No direct DB access (Repository Agent-owned). No HTTP/transport concerns."
+    trigger: "Architecture published."
+    completion_criteria: "Every acceptance criterion has a traceable implementation entry."
+    failure_conditions: "A rule cannot be traced back to a story; a rule assumes direct DB access."
+    max_attempts: 2
+    escalation_target: backend_lead
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: api_agent
+    display_name: "API Agent"
+    purpose: "Implements and exposes service endpoints per contract."
+    responsibilities:
+      - "Define routes, request/response schemas, and versioning."
+      - "Call into the Business Logic Agent's functions rather than reimplementing rules."
+    inputs: ["domain_logic"]
+    output_key: api_implementation
+    tools: ["code.write", "code.read", "test.run"]
+    constraints: "May not implement business rules inline."
+    trigger: "Business logic published."
+    completion_criteria: "Every domain function needed by a story is exposed by some endpoint."
+    failure_conditions: "An endpoint duplicates business-rule logic instead of calling into it."
+    max_attempts: 2
+    escalation_target: backend_lead
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: repository_agent
+    display_name: "Repository Agent"
+    purpose: "Owns the data-access layer between Business Logic and the Database Agent's schema."
+    responsibilities:
+      - "Implement query/persistence functions needed by the domain logic."
+      - "Flag any schema gap back to the Database Agent."
+    inputs: ["domain_logic", "db_schema"]
+    output_key: repository_layer
+    tools: ["code.write", "code.read", "db.query.validate"]
+    constraints: "May not alter the schema directly — requests changes from the Database Agent."
+    trigger: "Business logic and schema both published."
+    completion_criteria: "Every persistence need of the domain logic maps to a schema-valid query."
+    failure_conditions: "A query references an entity/field absent from db_schema."
+    max_attempts: 2
+    escalation_target: backend_lead
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: backend_lead
+    display_name: "Backend Lead"
+    purpose: "Owns delivery and quality of all server-side artifacts."
+    responsibilities:
+      - "Merge API and Repository outputs into one coherent backend module."
+      - "Confirm the merged module is contract-compliant end to end."
+    inputs: ["api_implementation", "repository_layer"]
+    output_key: backend_module
+    tools: ["task.assign", "code.review", "message.send"]
+    constraints: "Does not write API/business logic code directly — merges and reviews sub-agent output only."
+    trigger: "API and Repository agents have both produced artifacts."
+    completion_criteria: "Merged module is internally consistent and contract-compliant."
+    failure_conditions: "Sub-agent artifacts conflict with each other or with the database schema."
+    max_attempts: 1
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: qa_lead
+    display_name: "QA Lead"
+    purpose: "Owns the overall quality gate before DevOps promotion."
+    responsibilities:
+      - "Define the test scope covering frontend and backend modules against acceptance criteria."
+      - "Confirm the modules are ready to enter the Unit -> Integration -> E2E test tiers."
+    inputs: ["frontend_module", "backend_module"]
+    output_key: qa_scope
+    tools: ["task.assign", "test.aggregate", "message.send"]
+    constraints: "Does not write test code directly — defines scope for the test-tier agents."
+    trigger: "Frontend and Backend modules both merged."
+    completion_criteria: "Test scope traces every acceptance criterion to at least one planned test."
+    failure_conditions: "An acceptance criterion has no planned test coverage."
+    max_attempts: 1
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: unit_test_agent
+    display_name: "Unit Test Agent"
+    purpose: "Verifies function/component-level correctness in isolation."
+    responsibilities:
+      - "Design unit tests against the Business Logic, Repository, and UI component artifacts."
+      - "Report coverage against the QA scope."
+    inputs: ["qa_scope", "domain_logic", "repository_layer", "ui_components"]
+    output_key: unit_test_report
+    tools: ["test.write", "test.run", "coverage.report"]
+    constraints: "May mock external dependencies only, never the code under test itself."
+    trigger: "QA scope published."
+    completion_criteria: "Coverage meets the QA scope; all designed tests pass."
+    failure_conditions: "A designed test fails; coverage falls short of the QA scope."
+    max_attempts: 2
+    escalation_target: qa_lead
+    verdict_required: true
+    requires_human_approval: false
+    skill_references: [".agents/skills/tdd/GUIDANCE.md"]
+
+  - name: integration_agent
+    display_name: "Integration Agent"
+    purpose: "Verifies correct interaction across module boundaries."
+    responsibilities:
+      - "Design integration tests against the interface contracts in the architecture."
+      - "Confirm the frontend and backend modules interoperate as contracted."
+    inputs: ["unit_test_report", "architecture", "frontend_module", "backend_module"]
+    output_key: integration_test_report
+    tools: ["test.write", "test.run", "contract.validate"]
+    constraints: "Assumes a staged environment; never targets production."
+    trigger: "Unit Test Agent passes."
+    completion_criteria: "All contract paths are exercised and pass."
+    failure_conditions: "A contract violation is detected between frontend and backend."
+    max_attempts: 2
+    escalation_target: qa_lead
+    verdict_required: true
+    requires_human_approval: false
+    skill_references: [".agents/skills/tdd/GUIDANCE.md"]
+
+  - name: e2e_agent
+    display_name: "E2E Agent"
+    purpose: "Verifies complete user journeys behave per acceptance criteria."
+    responsibilities:
+      - "Script end-to-end journeys covering every critical user story."
+      - "Report pass/fail per journey."
+    inputs: ["integration_test_report", "user_stories", "ux_flows"]
+    output_key: e2e_test_report
+    tools: ["browser.automate", "test.run"]
+    constraints: "Assumes an ephemeral staging environment provisioned by DevOps."
+    trigger: "Integration Agent passes."
+    completion_criteria: "All critical-path journeys pass."
+    failure_conditions: "A critical journey fails; staging environment assumptions are violated."
+    max_attempts: 2
+    escalation_target: qa_lead
+    verdict_required: true
+    requires_human_approval: false
+
+  - name: security_lead
+    display_name: "Security Lead"
+    purpose: "Owns security posture — code, dependencies, infra, secrets."
+    responsibilities:
+      - "Review the merged modules and architecture for security findings."
+      - "Classify findings by severity and flag any blocking issue."
+    inputs: ["e2e_test_report", "architecture", "frontend_module", "backend_module"]
+    output_key: security_review
+    tools: ["sast.scan", "dependency.audit", "secrets.scan", "doc.write"]
+    constraints: "Cannot modify code directly — issues remediation tasks back to the owning Lead."
+    trigger: "E2E Agent passes."
+    completion_criteria: "Zero blocking-severity findings remain."
+    failure_conditions: "A blocking finding is unresolved after two remediation cycles."
+    max_attempts: 2
+    escalation_target: ceo_agent
+    verdict_required: true
+    requires_human_approval: false
+
+  - name: devops_lead
+    display_name: "DevOps Lead"
+    purpose: "Owns build, release, infra, and environment provisioning."
+    responsibilities:
+      - "Define the CI/CD pipeline and release plan for the validated build."
+      - "Define health checks and a rollback plan."
+    inputs: ["e2e_test_report", "security_review"]
+    output_key: deployment_log
+    tools: ["ci.run", "infra.provision", "deploy.execute", "deploy.rollback"]
+    constraints: "Cannot proceed without both QA and Security sign-off recorded upstream."
+    trigger: "QA and Security both approved."
+    completion_criteria: "Release plan defines health checks and a rollback path."
+    failure_conditions: "No rollback path defined; health checks are unspecified."
+    max_attempts: 1
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: true
+
+  - name: documentation_agent
+    display_name: "Documentation Agent"
+    purpose: "Owns all human-facing documentation derived from artifacts."
+    responsibilities:
+      - "Generate architecture docs, API docs, and a changelog from the canonical artifacts."
+      - "Trace every doc section back to a real artifact — no speculative documentation."
+    inputs: ["deployment_log", "architecture", "api_implementation"]
+    output_key: docs
+    tools: ["doc.write", "doc.generate_from_schema"]
+    constraints: "Documents only what exists in artifacts."
+    trigger: "Deployment plan complete."
+    completion_criteria: "Every public artifact has corresponding doc coverage."
+    failure_conditions: "A doc section references a nonexistent artifact/version."
+    max_attempts: 2
+    escalation_target: project_manager_agent
+    verdict_required: false
+    requires_human_approval: false
+
+  - name: project_manager_agent
+    display_name: "Project Manager Agent"
+    purpose: "Keeps execution on schedule and produces the final status rollup."
+    responsibilities:
+      - "Summarize the full run: what was built, what was escalated, what remains open."
+      - "Surface schedule/risk observations for the next iteration."
+    inputs: ["docs"]
+    output_key: status_report
+    tools: ["task.create", "task.assign", "memory.global.read", "message.send"]
+    constraints: "Cannot alter scope (CEO-only); cannot approve artifacts (QA/Lead-only)."
+    trigger: "Documentation Agent completes."
+    completion_criteria: "Status report accounts for every task in the run."
+    failure_conditions: "A task in the run is missing from the status report."
+    max_attempts: 1
+    escalation_target: ceo_agent
+    verdict_required: false
+    requires_human_approval: false

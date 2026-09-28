@@ -1,0 +1,94 @@
+# Task DAG. "agent" must match a name in configs/agents.yaml.
+# "depends_on" task ids must all reach VALIDATED before a task becomes eligible to run.
+# "requires_approval: true" pauses the scheduler for a CLI human approval before validation.
+#
+# Design note: the Project Manager Agent's spec (Section 3.2) describes it as producing the
+# task graph itself and consuming the Architect's design. Since this file *is* that task graph
+# (declared up front so the DAG engine can validate it for cycles before anything runs), the
+# runtime role of project_manager_agent is narrowed to a closing status rollup that runs last
+# and accounts for the whole executed run. See README.md "Design simplifications".
+
+workflow:
+  name: "{{PROJECT_NAME}}_sdlc"
+  tasks:
+    - id: ceo_agent
+      agent: ceo_agent
+      depends_on: []
+      requires_approval: true
+
+    - id: product_agent
+      agent: product_agent
+      depends_on: [ceo_agent]
+
+    - id: architect_agent
+      agent: architect_agent
+      depends_on: [product_agent]
+
+    - id: ui_agent
+      agent: ui_agent
+      depends_on: [architect_agent]
+
+    - id: ux_agent
+      agent: ux_agent
+      depends_on: [architect_agent]
+
+    - id: accessibility_agent
+      agent: accessibility_agent
+      depends_on: [ui_agent, ux_agent]
+
+    - id: frontend_lead
+      agent: frontend_lead
+      depends_on: [ui_agent, ux_agent, accessibility_agent]
+
+    - id: database_agent
+      agent: database_agent
+      depends_on: [architect_agent]
+
+    - id: business_logic_agent
+      agent: business_logic_agent
+      depends_on: [architect_agent]
+
+    - id: api_agent
+      agent: api_agent
+      depends_on: [business_logic_agent]
+
+    - id: repository_agent
+      agent: repository_agent
+      depends_on: [business_logic_agent, database_agent]
+
+    - id: backend_lead
+      agent: backend_lead
+      depends_on: [api_agent, repository_agent]
+
+    - id: qa_lead
+      agent: qa_lead
+      depends_on: [frontend_lead, backend_lead]
+
+    - id: unit_test_agent
+      agent: unit_test_agent
+      depends_on: [qa_lead]
+
+    - id: integration_agent
+      agent: integration_agent
+      depends_on: [unit_test_agent]
+
+    - id: e2e_agent
+      agent: e2e_agent
+      depends_on: [integration_agent]
+
+    - id: security_lead
+      agent: security_lead
+      depends_on: [e2e_agent]
+
+    - id: devops_lead
+      agent: devops_lead
+      depends_on: [e2e_agent, security_lead]
+      requires_approval: true
+
+    - id: documentation_agent
+      agent: documentation_agent
+      depends_on: [devops_lead]
+
+    - id: project_manager_agent
+      agent: project_manager_agent
+      depends_on: [documentation_agent]
